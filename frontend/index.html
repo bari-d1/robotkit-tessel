@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport"
+          content="width=device-width, user-scalable=no, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <title>Document</title>
+    <script src="angular.min.js"></script>
+    <script src="cv.js"></script>
+    <script src="aruco.js"></script>
+    <script src="lodash.js"></script>
+    <script src="socket.io.js"></script>
+
+    <script>
+        var SPEED1 = 256;
+        var SPEED2 = 512;
+        var SPEED3 = 1024;
+        var SPEED4 = 2048;
+        var SPEED5 = 4095;
+
+        var MOTOR1 = 1;
+        var MOTOR2 = 3;
+        var MOTOR3 = 5;
+        var MOTOR4 = 7;
+        var MOTOR5 = 9;
+
+        var DIRECTION_NONE = -1;
+        var DIRECTION_FORWARD = 0;
+        var DIRECTION_BACKWARD = 1;
+
+        var video, canvas, context, imageData, detector;
+
+        function onLoad(){
+            video = document.getElementById("video");
+            canvas = document.getElementById("canvas");
+            context = canvas.getContext("2d");
+
+            canvas.width = parseInt(canvas.style.width);
+            canvas.height = parseInt(canvas.style.height);
+
+            navigator.getUserMedia = navigator.getUserMedia || navigator.webkitGetUserMedia || navigator.mozGetUserMedia;
+            if (navigator.getUserMedia){
+
+                function successCallback(stream){
+                    if (window.webkitURL) {
+                        video.src = window.webkitURL.createObjectURL(stream);
+                    } else if (video.mozSrcObject !== undefined) {
+                        video.mozSrcObject = stream;
+                    } else {
+                        video.src = stream;
+                    }
+                }
+
+                function errorCallback(error){
+                }
+
+                navigator.getUserMedia({video: true}, successCallback, errorCallback);
+
+                detector = new AR.Detector();
+
+                requestAnimationFrame(tick);
+            }
+        }
+
+        function getAngle(p1, p2, p3) {
+            var ap2 = { x: p2.x - p1.x, y: p2.y - p1.y };
+            var cp2 = { x: p2.x - p3.x, y: p2.y - p3.y };
+            // dot product  
+            var dot = (ap2.x * cp2.x + ap2.y * cp2.y);
+            // length square of both vectors
+            var abSqr = ap2.x * ap2.x + ap2.y * ap2.y;
+            var cbSqr = cp2.x * cp2.x + cp2.y * cp2.y;
+            // square of cosine of the needed angle    
+            var cosSqr = dot * dot / abSqr / cbSqr;
+            // this is a known trigonometric equality:
+            // cos(alpha * 2) = [ cos(alpha) ]^2 * 2 - 1
+            var cos2 = 2 * cosSqr - 1;
+
+            // Here's the only invocation of the heavy function.
+            // It's a good idea to check explicitly if cos2 is within [-1 .. 1] range
+            var alpha2 = (cos2 <= -1) ? Math.PI : (cos2 >= 1) ? 0 : Math.acos(cos2);
+            var rslt = alpha2 / 2;
+            var rs = rslt * 180 / Math.PI;
+            return Math.round(rs * 100) / 100;
+        }
+        function tick(){
+            requestAnimationFrame(tick);
+
+            if (video.readyState === video.HAVE_ENOUGH_DATA){
+                snapshot();
+
+                var markers = detector.detect(imageData);
+                drawCorners(markers);
+                //drawId(markers);
+
+                var marker1 = _.find(markers, { id: 963 });
+                var marker2 = _.find(markers, { id: 45 });
+                var marker3 = _.find(markers, { id: 3 });
+                var marker4 = _.find(markers, { id: 1001 });
+
+
+                if (marker1 && marker2 && marker3 && marker4) {
+                    var markers = [marker1, marker2, marker3, marker4];
+
+                    context.lineWidth = 10;
+                    context.strokeStyle = "lightgreen";
+                    context.beginPath();
+
+                    for (i = 0; i !== markers.length; ++ i){
+                        var corner = markers[i].corners[0];
+                        var nextMarker = markers[i + 1];
+
+                        context.moveTo(corner.x, corner.y);
+                        if (nextMarker) {
+                            context.lineTo(nextMarker.corners[0].x, nextMarker.corners[0].y);
+
+                            var angleRadians = Math.atan2(nextMarker.corners[0].y - corner.y, nextMarker.corners[0].x - corner.x);
+                            var angleDeg = angleRadians * 180 / Math.PI;
+                        }
+                    }
+
+                    var p1 = { x: 0, y: 0 };
+                    var p2 = { x: 90, y: 0 };
+                    var p3 = { x: 90, y: 90 };
+                    var angle = getAngle(p1, p2, p3);
+
+                    console.info(angle);
+                    var angle1 = getAngle(marker1.corners[0], marker2.corners[0], marker3.corners[0]);
+                    var angle2 = getAngle(marker2.corners[0], marker3.corners[0], marker4.corners[0]);
+
+                    context.stroke();
+
+                    context.lineWidth = 1;
+                    context.strokeStyle = "blue";
+
+                    context.strokeText(angle1, marker2.corners[0].x, marker2.corners[0].y);
+                    context.strokeText(angle2, marker3.corners[0].x, marker3.corners[0].y);
+
+                    context.closePath();
+                }
+            }
+        }
+
+        function snapshot(){
+            context.drawImage(video, 0, 0, canvas.width, canvas.height);
+            imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+        }
+
+        function drawCorners(markers){
+            var corners, corner, i, j;
+
+            context.lineWidth = 3;
+
+            for (i = 0; i !== markers.length; ++ i){
+                corners = markers[i].corners;
+
+                context.strokeStyle = "red";
+                context.beginPath();
+
+                for (j = 0; j !== corners.length; ++ j){
+                    corner = corners[j];
+                    context.moveTo(corner.x, corner.y);
+                    corner = corners[(j + 1) % corners.length];
+                    context.lineTo(corner.x, corner.y);
+                }
+
+                context.stroke();
+                context.closePath();
+
+                context.strokeStyle = "green";
+                context.strokeRect(corners[0].x - 2, corners[0].y - 2, 4, 4);
+            }
+        }
+
+        window.onload = onLoad;
+
+        var app = angular.module('app', [])
+                .controller('MainCtrl', function($scope) {
+                    var socket = io('http://192.168.1.101');
+
+                    $scope.test = { value: 2048 };
+
+                    $scope.motors = [
+                            MOTOR1,
+                            MOTOR2,
+                            MOTOR3,
+                            MOTOR4,
+                            MOTOR5
+                    ];
+
+                    socket.on('setMotorStateForTimeStops', function() {
+                        console.info('setMotorStateForTimeStops');
+                    });
+
+                    $scope.forward = function(index) {
+                        socket.emit('setMotorStateForTime', index, DIRECTION_FORWARD, 1,  $scope.test.value);
+                    };
+
+                    $scope.backward = function(index) {
+                        socket.emit('setMotorStateForTime', index, DIRECTION_BACKWARD, 1,  $scope.test.value);
+                    };
+
+                    $scope.stop = function(index) {
+                        socket.emit('stopMotor', index);
+                    };
+                })
+    </script>
+</head>
+<body ng-app="app" ng-controller="MainCtrl">
+
+
+<input ng-model="test.value" type="range" max="4095" min="255" step="128" />
+{{test.value}}
+<div ng-repeat="(n, motor) in motors">
+
+    Motor #{{n+1}}
+
+    <div>
+        <button ng-click="forward(motor)">forward</button>
+        <button ng-click="backward(motor)">backward</button>
+        <button ng-click="stop(motor)">Stop</button>
+    </div>
+</div>
+
+<!-- put this in head -->
+<script src="cv.js"></script>
+<script src="aruco.js"></script>
+<script src="lodash.js"></script>
+
+<!-- this in body -->
+<video id="video" autoplay="true" style="display:none;"></video>
+<canvas id="canvas" style="width:640px; height:480px;"></canvas>
+
+</body>
+</html>
